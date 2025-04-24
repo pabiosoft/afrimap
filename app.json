@@ -33,8 +33,7 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-location",
-      "react-native-maps"
+      "expo-location"
     ],
     "permissions": [
       "ACCESS_FINE_LOCATION",
