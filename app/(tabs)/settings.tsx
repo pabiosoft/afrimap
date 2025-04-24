@@ -1,252 +1,179 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Switch, ScrollView, Image, Alert } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, SafeAreaView, TouchableOpacity, Switch, Alert } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { useAuth } from '@/context/AuthContext';
+import LoginForm from '@/components/auth/LoginForm';
+import RegisterForm from '@/components/auth/RegisterForm';
+import UserProfile from '@/components/auth/UserProfile';
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { Colors } from '@/constants/Colors';
-import { IconSymbol } from '@/components/ui/IconSymbol';
+import { useThemeColor } from '@/hooks/useThemeColor';
 
 export default function SettingsScreen() {
-  const colorScheme = useColorScheme();
+  const { authState } = useAuth();
+  const { isAuthenticated } = authState;
   
-  // États pour les différents paramètres
-  const [isLocationEnabled, setIsLocationEnabled] = useState(true);
-  const [isSatelliteView, setIsSatelliteView] = useState(false);
-  const [useMetricSystem, setUseMetricSystem] = useState(true);
-  const [showOfflineMaps, setShowOfflineMaps] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  // Fonction de connexion simulée
-  const handleLogin = () => {
-    // Simulation de connexion
-    setTimeout(() => {
-      setIsLoggedIn(true);
-      Alert.alert('Connecté', 'Vous êtes maintenant connecté à votre compte.');
-    }, 1000);
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  
+  // Options de paramètres
+  const [locationEnabled, setLocationEnabled] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [darkMapEnabled, setDarkMapEnabled] = useState(false);
+  
+  const colorScheme = useColorScheme();
+  const backgroundColor = useThemeColor({ light: '#f9f9f9', dark: '#000' }, 'background');
+  const textColor = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
+  
+  const toggleAuthForms = (showLogin: boolean) => {
+    if (showLogin) {
+      setShowLoginForm(true);
+      setShowRegisterForm(false);
+    } else {
+      setShowLoginForm(false);
+      setShowRegisterForm(true);
+    }
+  };
+  
+  const closeAuthForms = () => {
+    setShowLoginForm(false);
+    setShowRegisterForm(false);
   };
 
-  // Fonction de déconnexion simulée
-  const handleLogout = () => {
-    Alert.alert(
-      'Déconnexion',
-      'Êtes-vous sûr de vouloir vous déconnecter ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { 
-          text: 'Déconnexion', 
-          onPress: () => {
-            setIsLoggedIn(false);
-          }
-        },
-      ]
-    );
-  };
-
-  // Fonction pour vider le cache (simulée)
-  const handleClearCache = () => {
-    Alert.alert(
-      'Vider le cache',
-      'Êtes-vous sûr de vouloir vider le cache ? Cela supprimera les cartes hors ligne et les données temporaires.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        { 
-          text: 'Vider', 
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('Cache vidé', 'Le cache a été vidé avec succès.');
-          }
-        },
-      ]
-    );
-  };
-
-  // Rendu d'un groupe de paramètres
-  const SettingsGroup = ({ title, children }: { title: string, children: React.ReactNode }) => (
-    <View style={styles.settingsGroup}>
-      <Text style={styles.groupTitle}>{title}</Text>
-      <View style={[styles.groupContainer, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground || '#fff' }]}>
-        {children}
-      </View>
-    </View>
-  );
-
-  // Rendu d'un élément de paramètre avec switch
-  const SettingsSwitch = ({ 
-    title, 
-    description, 
-    value, 
-    onValueChange 
-  }: { 
-    title: string, 
-    description?: string, 
-    value: boolean, 
-    onValueChange: (value: boolean) => void 
-  }) => (
-    <View style={styles.settingsItem}>
-      <View style={styles.settingsTextContainer}>
-        <Text style={[styles.settingsTitle, { color: Colors[colorScheme ?? 'light'].text }]}>{title}</Text>
-        {description && <Text style={styles.settingsDescription}>{description}</Text>}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: '#e1e1e1', true: '#0a7ea4' }}
-        thumbColor={value ? '#fff' : '#fff'}
-      />
-    </View>
-  );
-
-  // Rendu d'un élément de paramètre avec action
-  const SettingsAction = ({ 
-    title, 
-    description, 
-    onPress, 
-    icon,
-    color
-  }: { 
-    title: string, 
-    description?: string, 
-    onPress: () => void, 
-    icon?: string,
-    color?: string
-  }) => (
-    <TouchableOpacity style={styles.settingsItem} onPress={onPress}>
-      <View style={styles.settingsTextContainer}>
-        <Text style={[
-          styles.settingsTitle, 
-          { color: color || Colors[colorScheme ?? 'light'].text }
-        ]}>
-          {title}
+  // Rendu du formulaire d'authentification approprié
+  const renderAuthForm = () => {
+    if (showLoginForm) {
+      return (
+        <LoginForm 
+          onCancel={closeAuthForms}
+          onRegisterPress={() => toggleAuthForms(false)}
+          onSuccess={closeAuthForms}
+        />
+      );
+    } else if (showRegisterForm) {
+      return (
+        <RegisterForm 
+          onCancel={closeAuthForms}
+          onSuccess={closeAuthForms}
+        />
+      );
+    }
+    
+    // Si l'utilisateur n'est pas authentifié et aucun formulaire n'est affiché
+    return (
+      <View style={styles.authPromptContainer}>
+        <Text style={[styles.authPromptText, { color: textColor }]}>
+          Connectez-vous ou créez un compte pour sauvegarder vos lieux préférés et partager avec d'autres utilisateurs.
         </Text>
-        {description && <Text style={styles.settingsDescription}>{description}</Text>}
+        <View style={styles.authButtonsContainer}>
+          <TouchableOpacity 
+            style={[styles.authButton, styles.loginButton]}
+            onPress={() => toggleAuthForms(true)}
+          >
+            <Text style={styles.authButtonText}>Se connecter</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.authButton, styles.registerButton]}
+            onPress={() => toggleAuthForms(false)}
+          >
+            <Text style={styles.authButtonText}>S'inscrire</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      {icon && <IconSymbol name={icon} size={22} color={color || '#888'} />}
-    </TouchableOpacity>
-  );
-
+    );
+  };
+  
+  // Rendu de la section d'authentification (formulaires ou profil)
+  const renderAuthSection = () => {
+    if (isAuthenticated) {
+      return <UserProfile />;
+    }
+    
+    return renderAuthForm();
+  };
+  
   return (
-    <ScrollView style={[
-      styles.container, 
-      { backgroundColor: Colors[colorScheme ?? 'light'].background }
-    ]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
-          Paramètres
-        </Text>
-      </View>
-
-      {/* Profil utilisateur */}
-      <View style={styles.profileSection}>
-        {isLoggedIn ? (
-          <View style={styles.loggedInContainer}>
-            <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>KD</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor }]}>
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: textColor }]}>Paramètres</Text>
+        </View>
+        
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Compte utilisateur</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff' }]}>
+            {renderAuthSection()}
+          </View>
+        </View>
+        
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Carte</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff' }]}>
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: textColor }]}>Activer la localisation</Text>
+              <Switch
+                value={locationEnabled}
+                onValueChange={setLocationEnabled}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={locationEnabled ? '#0a7ea4' : '#f4f3f4'}
+              />
             </View>
-            <View style={styles.userInfo}>
-              <Text style={[styles.username, { color: Colors[colorScheme ?? 'light'].text }]}>
-                Killian Dupont
-              </Text>
-              <Text style={styles.email}>killian.dupont@example.com</Text>
+            
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: textColor }]}>Thème sombre pour la carte</Text>
+              <Switch
+                value={darkMapEnabled}
+                onValueChange={setDarkMapEnabled}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={darkMapEnabled ? '#0a7ea4' : '#f4f3f4'}
+              />
             </View>
           </View>
-        ) : (
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>Se connecter</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Paramètres de carte */}
-      <SettingsGroup title="CARTE">
-        <SettingsSwitch 
-          title="Localisation en arrière-plan" 
-          description="Autoriser l'accès à votre position même lorsque l'application est fermée"
-          value={isLocationEnabled} 
-          onValueChange={setIsLocationEnabled} 
-        />
-        <SettingsSwitch 
-          title="Vue satellite" 
-          description="Utiliser les images satellite sur la carte"
-          value={isSatelliteView} 
-          onValueChange={setIsSatelliteView} 
-        />
-        <SettingsSwitch 
-          title="Système métrique" 
-          description="Utiliser les kilomètres au lieu des miles"
-          value={useMetricSystem} 
-          onValueChange={setUseMetricSystem} 
-        />
-      </SettingsGroup>
-
-      {/* Paramètres d'application */}
-      <SettingsGroup title="APPLICATION">
-        <SettingsSwitch 
-          title="Cartes hors ligne" 
-          description="Télécharger les cartes pour une utilisation sans connexion"
-          value={showOfflineMaps} 
-          onValueChange={setShowOfflineMaps} 
-        />
-        <SettingsAction 
-          title="Langue" 
-          description="Français"
-          onPress={() => {
-            Alert.alert('Langue', 'Fonctionnalité à venir dans une prochaine mise à jour.');
-          }}
-          icon="chevron.right"
-        />
-        <SettingsAction 
-          title="Vider le cache" 
-          description="Libérer de l'espace de stockage"
-          onPress={handleClearCache}
-          icon="trash"
-        />
-      </SettingsGroup>
-
-      {/* À propos */}
-      <SettingsGroup title="À PROPOS">
-        <SettingsAction 
-          title="Version" 
-          description="1.0.0"
-          onPress={() => {}}
-        />
-        <SettingsAction 
-          title="Conditions d'utilisation" 
-          onPress={() => {
-            Alert.alert('Conditions d\'utilisation', 'Fonctionnalité à venir dans une prochaine mise à jour.');
-          }}
-          icon="doc.text"
-        />
-        <SettingsAction 
-          title="Politique de confidentialité" 
-          onPress={() => {
-            Alert.alert('Politique de confidentialité', 'Fonctionnalité à venir dans une prochaine mise à jour.');
-          }}
-          icon="lock.shield"
-        />
-      </SettingsGroup>
-
-      {/* Options de compte */}
-      {isLoggedIn && (
-        <SettingsGroup title="COMPTE">
-          <SettingsAction 
-            title="Modifier le profil" 
-            onPress={() => {
-              Alert.alert('Profil', 'Fonctionnalité à venir dans une prochaine mise à jour.');
-            }}
-            icon="person.crop.circle"
-          />
-          <SettingsAction 
-            title="Se déconnecter" 
-            onPress={handleLogout}
-            icon="arrow.right.square"
-            color="#ff3b30"
-          />
-        </SettingsGroup>
-      )}
-
-      {/* Pied de page avec informations de copyright */}
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>© 2025 AfriMap. Tous droits réservés.</Text>
-      </View>
-    </ScrollView>
+        </View>
+        
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>Notifications</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff' }]}>
+            <View style={styles.settingRow}>
+              <Text style={[styles.settingLabel, { color: textColor }]}>Activer les notifications</Text>
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={setNotificationsEnabled}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={notificationsEnabled ? '#0a7ea4' : '#f4f3f4'}
+              />
+            </View>
+          </View>
+        </View>
+        
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: textColor }]}>À propos</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#fff' }]}>
+            <TouchableOpacity 
+              style={styles.aboutRow}
+              onPress={() => Alert.alert("AfriMap", "Version 1.0\n© 2025 AfriMap")}
+            >
+              <Text style={[styles.aboutText, { color: textColor }]}>Version de l'application</Text>
+              <Text style={styles.versionText}>1.0</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.aboutRow}
+              onPress={() => Alert.alert("Conditions d'utilisation", "Les conditions d'utilisation complètes seront disponibles prochainement.")}
+            >
+              <Text style={[styles.aboutText, { color: textColor }]}>Conditions d'utilisation</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.aboutRow, { borderBottomWidth: 0 }]}
+              onPress={() => Alert.alert("Politique de confidentialité", "La politique de confidentialité complète sera disponible prochainement.")}
+            >
+              <Text style={[styles.aboutText, { color: textColor }]}>Politique de confidentialité</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+    </SafeAreaView>
   );
 }
 
@@ -254,108 +181,90 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  profileSection: {
-    paddingHorizontal: 16,
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  loggedInContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    paddingVertical: 16,
-  },
-  avatarContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#0a7ea4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  avatarText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  userInfo: {
+  scrollView: {
     flex: 1,
   },
-  username: {
-    fontSize: 20,
+  header: {
+    padding: 20,
+    paddingTop: 60,
+  },
+  title: {
+    fontSize: 34,
     fontWeight: 'bold',
-    marginBottom: 4,
   },
-  email: {
-    fontSize: 16,
-    color: '#666',
+  section: {
+    marginBottom: 25,
+    paddingHorizontal: 20,
   },
-  loginButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 30,
-    marginVertical: 16,
-  },
-  loginButtonText: {
-    color: '#fff',
+  sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
+    marginBottom: 10,
   },
-  settingsGroup: {
-    marginBottom: 24,
-    paddingHorizontal: 16,
-  },
-  groupTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#888',
-    marginBottom: 8,
-    marginLeft: 8,
-  },
-  groupContainer: {
+  sectionContent: {
     borderRadius: 12,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  settingsItem: {
+  settingRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  settingsTextContainer: {
-    flex: 1,
-    marginRight: 8,
-  },
-  settingsTitle: {
+  settingLabel: {
     fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 2,
   },
-  settingsDescription: {
-    fontSize: 14,
+  aboutRow: {
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  aboutText: {
+    fontSize: 16,
+  },
+  versionText: {
+    fontSize: 16,
     color: '#888',
   },
-  footer: {
-    marginTop: 8,
-    marginBottom: 32,
+  authPromptContainer: {
+    padding: 20,
     alignItems: 'center',
   },
-  footerText: {
-    fontSize: 12,
-    color: '#888',
+  authPromptText: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  authButtonsContainer: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+  },
+  authButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 5,
+    alignItems: 'center',
+    marginHorizontal: 5,
+  },
+  loginButton: {
+    backgroundColor: '#0a7ea4',
+  },
+  registerButton: {
+    backgroundColor: '#4CAF50',
+  },
+  authButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });

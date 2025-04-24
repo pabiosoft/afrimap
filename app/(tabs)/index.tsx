@@ -1,16 +1,14 @@
-import { StyleSheet, View, Alert, Platform, Text, TextInput, Modal, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Alert, Platform, Text, Modal, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
 import { useState, useRef, useEffect } from 'react';
 import MapView, { Marker, Callout, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-
-// Interface pour les marqueurs personnalisés
-interface CustomMarker {
-  id: string;
-  latitude: number;
-  longitude: number;
-  name: string;
-  description?: string;
-}
+import * as Haptics from 'expo-haptics';
+import { useAuth } from '@/context/AuthContext';
+import { locationService } from '@/services/api/location';
+import { Location as LocationType, LocationFormData } from '@/types/location';
+import LocationForm from '@/components/LocationForm';
+import { useThemeColor } from '@/hooks/useThemeColor';
+import { useColorScheme } from '@/hooks/useColorScheme';
 
 export default function HomeScreen() {
   const [region, setRegion] = useState<Region>({
@@ -22,16 +20,24 @@ export default function HomeScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const mapRef = useRef<MapView>(null);
   
-  // États pour gérer les marqueurs personnalisés
-  const [customMarkers, setCustomMarkers] = useState<CustomMarker[]>([]);
-  const [isMarkerDialogVisible, setMarkerDialogVisible] = useState(false);
-  const [markerName, setMarkerName] = useState('');
-  const [newMarkerPosition, setNewMarkerPosition] = useState<{latitude: number, longitude: number} | null>(null);
-  
   // État pour la position de l'utilisateur
   const [userLocation, setUserLocation] = useState<{latitude: number, longitude: number} | null>(null);
-
-  // Obtenir la localisation de l'utilisateur au démarrage de l'app
+  
+  // États pour gérer les marqueurs et lieux
+  const [locations, setLocations] = useState<LocationType[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // États pour la pression forte sur iOS
+  const [longPressTimeout, setLongPressTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showLocationForm, setShowLocationForm] = useState(false);
+  const [newMarkerPosition, setNewMarkerPosition] = useState<{latitude: number, longitude: number} | null>(null);
+  
+  const { authState } = useAuth();
+  const colorScheme = useColorScheme();
+  const backgroundColor = useThemeColor({ light: '#fff', dark: '#121212' }, 'background');
+  
+  // Obtenir la localisation de l'utilisateur et charger les lieux au démarrage
   useEffect(() => {
     (async () => {
       // Demander la permission d'accès à la localisation
@@ -70,46 +76,138 @@ export default function HomeScreen() {
             longitudeDelta: 0.0421
           }, 1000);
         }
+        
+        // Charger les lieux depuis l'API
+        loadLocations();
       } catch (error) {
         setErrorMsg('Could not get your location');
         console.error(error);
       }
     })();
   }, []);
-
-  // Handle long press on map
-  const handleLongPress = (event: any) => {
-    const coordinate = event.nativeEvent.coordinate;
-    setNewMarkerPosition(coordinate);
-    setMarkerName('');
-    setMarkerDialogVisible(true);
-  };
-
-  // Save new marker with name
-  const handleSaveMarker = () => {
-    if (newMarkerPosition && markerName.trim()) {
-      const newMarker: CustomMarker = {
-        id: `custom-marker-${Date.now()}`,
-        latitude: newMarkerPosition.latitude,
-        longitude: newMarkerPosition.longitude,
-        name: markerName.trim(),
-        description: `Added on ${new Date().toLocaleDateString()}`
-      };
-
-      setCustomMarkers((prevMarkers: CustomMarker[]) => [...prevMarkers, newMarker]);
-      setMarkerDialogVisible(false);
-      setNewMarkerPosition(null);
+  
+  // Chargement des lieux depuis l'API
+  const loadLocations = async () => {
+    try {
+      setIsLoading(true);
       
-      // Confirm to user
-      Alert.alert('Marker Created', `"${markerName.trim()}" has been added to the map.`);
-    } else if (!markerName.trim()) {
-      Alert.alert('Error', 'Please enter a name for this marker.');
+      // Récupérer les lieux publics
+      const response = await locationService.getAllLocations(1, true);
+      
+      if (response.data) {
+        setLocations(response.data);
+      } else if (response.error) {
+        console.error('Erreur lors du chargement des lieux:', response.error);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement des lieux:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  // Handle marker selection
-  const onMarkerSelected = (marker: CustomMarker) => {
-    Alert.alert(marker.name, marker.description || '');
+  
+  // Gestion de la pression longue pour Android
+  const handleLongPress = (event: any) => {
+    const coordinate = event.nativeEvent.coordinate;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    showNewLocationForm(coordinate);
+  };
+  
+  // Fonction pour afficher le formulaire de lieu
+  const showNewLocationForm = (coordinate: {latitude: number, longitude: number}) => {
+    setNewMarkerPosition(coordinate);
+    setShowLocationForm(true);
+  };
+  
+  // Gestion du début de pression pour iOS (pression forte)
+  const handlePressIn = (event: any) => {
+    if (Platform.OS === 'ios') {
+      // Déclencher un feedback haptique léger au début de la pression
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
+      const coordinate = event.nativeEvent.coordinate;
+      
+      // Configurer un délai pour détecter si c'est une pression forte
+      const timeout = setTimeout(() => {
+        // Après le délai, déclencher un feedback haptique fort
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        showNewLocationForm(coordinate);
+      }, 500); // 500ms de pression pour déclencher l'action
+      
+      setLongPressTimeout(timeout);
+    }
+  };
+  
+  // Gestion de la fin de pression pour iOS
+  const handlePressOut = () => {
+    if (Platform.OS === 'ios' && longPressTimeout) {
+      clearTimeout(longPressTimeout);
+      setLongPressTimeout(null);
+    }
+  };
+  
+  // Gestion du défilement de la carte
+  const handleDrag = () => {
+    setIsDragging(true);
+    if (longPressTimeout) {
+      clearTimeout(longPressTimeout);
+      setLongPressTimeout(null);
+    }
+  };
+  
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+  
+  // Création d'un nouveau lieu
+  const handleSaveLocation = async (locationData: LocationFormData) => {
+    try {
+      setIsLoading(true);
+      
+      // Créer la location
+      const response = await locationService.createLocation(locationData);
+      
+      if (response.data) {
+        const newLocation = response.data;
+        
+        // Ajouter la nouvelle location à la liste
+        setLocations(prev => [...prev, newLocation]);
+        
+        // Si l'utilisateur est connecté, sauvegarder dans ses favoris
+        if (authState.isAuthenticated && authState.user && newLocation['@id']) {
+          const userIri = authState.user['@id'] || '';
+          if (userIri) {
+            await locationService.saveLocationForUser(newLocation['@id'], userIri);
+          }
+        }
+        
+        // Fermer le formulaire
+        setShowLocationForm(false);
+        setNewMarkerPosition(null);
+        
+        // Informer l'utilisateur
+        Alert.alert(
+          "Succès",
+          "Le lieu a été créé avec succès.",
+          [{ text: "OK" }]
+        );
+      } else {
+        Alert.alert(
+          "Erreur",
+          response.error || "Une erreur est survenue lors de la création du lieu.",
+          [{ text: "OK" }]
+        );
+      }
+    } catch (error) {
+      console.error('Erreur lors de la création du lieu:', error);
+      Alert.alert(
+        "Erreur",
+        "Une erreur est survenue lors de la création du lieu.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -128,88 +226,74 @@ export default function HomeScreen() {
         showsMyLocationButton={true}
         onLongPress={handleLongPress}
         onRegionChangeComplete={(newRegion: Region) => setRegion(newRegion)}
+        onPress={(event) => {
+          if (Platform.OS === 'ios') {
+            handlePressIn(event);
+          }
+        }}
+        onPanDrag={handleDrag}
+        onRegionChange={handleDrag}
       >
-        {/* Afficher seulement les marqueurs personnalisés ajoutés par l'utilisateur */}
-        {customMarkers.map((marker: CustomMarker, index: number) => (
+        {/* Afficher les lieux existants */}
+        {locations.map((location, index) => (
           <Marker
-            key={`${marker.id || index}`}
+            key={location['@id'] || `location-${index}`}
             coordinate={{
-              latitude: marker.latitude,
-              longitude: marker.longitude
+              latitude: location.latitude,
+              longitude: location.longitude
             }}
-            title={marker.name}
-            description={marker.description}
-            onPress={() => onMarkerSelected(marker)}
+            title={location.name}
+            description={location.description}
+            pinColor={location.visibility === 'public' ? "#0a7ea4" : "#e91e63"}
           >
             <Callout tooltip>
-              <View style={styles.calloutContainer}>
-                <Text style={styles.calloutTitle}>{marker.name}</Text>
-                {marker.description && (
-                  <Text style={styles.calloutDescription}>{marker.description}</Text>
-                )}
+              <View style={[styles.calloutContainer, { backgroundColor }]}>
+                <Text style={styles.calloutTitle}>{location.name}</Text>
+                <Text style={styles.calloutDescription}>{location.description}</Text>
+                <Text style={styles.calloutVisibility}>
+                  {location.visibility === 'public' ? 'Public' : 'Privé'}
+                </Text>
               </View>
             </Callout>
           </Marker>
         ))}
-
-        {/* Marqueur de position de l'utilisateur (en plus du point bleu standard) */}
-        {userLocation && (
-          <Marker
-            coordinate={{
-              latitude: userLocation.latitude,
-              longitude: userLocation.longitude
-            }}
-            title="Ma position"
-            description="Vous êtes ici"
-          >
-            <Callout tooltip>
-              <View style={styles.calloutContainer}>
-                <Text style={styles.calloutTitle}>Ma position</Text>
-                <Text style={styles.calloutDescription}>Votre position actuelle</Text>
-              </View>
-            </Callout>
-          </Marker>
-        )}
       </MapView>
 
-      {/* Dialog pour nommer un nouveau marqueur */}
+      {/* Formulaire de création de lieu */}
       <Modal
         transparent={true}
-        visible={isMarkerDialogVisible}
-        animationType="fade"
-        onRequestClose={() => setMarkerDialogVisible(false)}
+        visible={showLocationForm}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowLocationForm(false);
+          setNewMarkerPosition(null);
+        }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>New Marker</Text>
-            <Text style={styles.modalSubtitle}>Enter a name for this location:</Text>
-            
-            <TextInput
-              style={styles.textInput}
-              value={markerName}
-              onChangeText={setMarkerName}
-              placeholder="Location name"
-              autoFocus
-              returnKeyType="done"
-            />
-            
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                style={[styles.button, styles.cancelButton]}
-                onPress={() => setMarkerDialogVisible(false)}
-              >
-                <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[styles.button, styles.saveButton]}
-                onPress={handleSaveMarker}
-              >
-                <Text style={styles.buttonText}>Save</Text>
-              </TouchableOpacity>
-            </View>
+        <TouchableWithoutFeedback onPress={() => {
+          setShowLocationForm(false);
+          setNewMarkerPosition(null);
+        }}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+              <View style={[
+                styles.modalContent, 
+                { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#ffffff' }
+              ]}>
+                {newMarkerPosition && (
+                  <LocationForm
+                    coordinate={newMarkerPosition}
+                    onSave={handleSaveLocation}
+                    onCancel={() => {
+                      setShowLocationForm(false);
+                      setNewMarkerPosition(null);
+                    }}
+                    isLoading={isLoading}
+                  />
+                )}
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
       
       {/* Bouton pour recentrer sur la position de l'utilisateur */}
@@ -250,65 +334,45 @@ const styles = StyleSheet.create({
   errorText: {
     marginBottom: 10,
     textAlign: 'center',
+    color: 'red',
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
   },
   modalContent: {
-    width: '80%',
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 20,
-    alignItems: 'center',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    minHeight: '70%',
+    maxHeight: '90%',
+  },
+  calloutContainer: {
+    padding: 10,
+    borderRadius: 6,
+    minWidth: 150,
+    maxWidth: 250,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  modalTitle: {
-    fontSize: 20,
+  calloutTitle: {
     fontWeight: 'bold',
+    fontSize: 16,
+    marginBottom: 5,
+  },
+  calloutDescription: {
+    fontSize: 14,
     marginBottom: 10,
   },
-  modalSubtitle: {
-    marginBottom: 15,
-    textAlign: 'center',
-  },
-  textInput: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 5,
-    padding: 10,
-    marginBottom: 20,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-  button: {
-    padding: 10,
-    borderRadius: 5,
-    width: '45%',
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#ccc',
-  },
-  saveButton: {
-    backgroundColor: '#0a7ea4',
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
+  calloutVisibility: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: '#666',
   },
   locateButton: {
     position: 'absolute',
@@ -332,26 +396,4 @@ const styles = StyleSheet.create({
   locateButtonText: {
     fontSize: 24,
   },
-  calloutContainer: {
-    padding: 10,
-    backgroundColor: 'white',
-    borderRadius: 5,
-    minWidth: 100,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  calloutTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginBottom: 5,
-  },
-  calloutDescription: {
-    fontSize: 14,
-  }
 });

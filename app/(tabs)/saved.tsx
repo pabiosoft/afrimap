@@ -1,65 +1,150 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, Alert, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, Alert, Image, ActivityIndicator } from 'react-native';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { locationService } from '@/services/api/location';
+import { useAuth } from '@/context/AuthContext';
+import { router } from 'expo-router';
 
-interface SavedLocation {
-  id: string;
+// Définition du type pour un lieu enregistré avec ses détails complets
+interface SavedLocationWithDetails {
+  id: string; // ID du SavedLocation
+  savedLocationId: string; // IRI complet du SavedLocation
   name: string;
-  address: string;
+  description: string;
+  address?: string;
   position: {
     lat: number;
     lng: number;
   };
-  dateAdded: string;
+  dateAdded?: string;
   imageUrl?: string;
 }
 
 export default function SavedScreen() {
   const colorScheme = useColorScheme();
+  const { authState } = useAuth();
   
-  // Données simulées - à remplacer par un vrai système de stockage (AsyncStorage, etc.)
-  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([
-    {
-      id: '1',
-      name: 'Mont Kilimandjaro',
-      address: 'Tanzanie',
-      position: { lat: -3.0674, lng: 37.3556 },
-      dateAdded: '15 avr. 2025',
-      imageUrl: 'https://images.unsplash.com/photo-1624967016136-c73125d8b11c?q=80&w=200&h=150&auto=format'
-    },
-    {
-      id: '2',
-      name: 'Marché de Marrakech',
-      address: 'Marrakech, Maroc',
-      position: { lat: 31.6295, lng: -7.9811 },
-      dateAdded: '10 avr. 2025',
-      imageUrl: 'https://images.unsplash.com/photo-1553185311-1302be737c3b?q=80&w=200&h=150&auto=format'
-    },
-    {
-      id: '3',
-      name: 'Chutes Victoria',
-      address: 'Frontière Zambie-Zimbabwe',
-      position: { lat: -17.9244, lng: 25.8567 },
-      dateAdded: '02 avr. 2025',
-      imageUrl: 'https://images.unsplash.com/photo-1552975084-6e027ba6e9b1?q=80&w=200&h=150&auto=format'
-    },
-    {
-      id: '4',
-      name: 'Parc Kruger',
-      address: 'Afrique du Sud',
-      position: { lat: -23.9884, lng: 31.5547 },
-      dateAdded: '28 mars 2025',
-      imageUrl: 'https://images.unsplash.com/photo-1535263352198-9f75e7d6a83d?q=80&w=200&h=150&auto=format'
-    },
-  ]);
+  // États pour gérer les données et le chargement
+  const [savedLocations, setSavedLocations] = useState<SavedLocationWithDetails[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMoreData, setHasMoreData] = useState(true);
+  const [totalItems, setTotalItems] = useState(0);
+  
+  // Fonction pour charger les lieux enregistrés
+  const loadSavedLocations = useCallback(async (pageNumber: number, shouldReset = false) => {
+    try {
+      if (loading || (!hasMoreData && pageNumber > 1)) return;
+      
+      setLoading(true);
+      setError(null);
+      
+      const response = await locationService.getSavedLocationsWithPagination(pageNumber);
+      
+      if (!response.data || response.error) {
+        setError(response.error || 'Erreur lors du chargement des lieux enregistrés');
+        return;
+      }
+      
+      setTotalItems(response.data.totalItems);
+      
+      // Vérifier s'il y a des pages supplémentaires
+      setHasMoreData(!!response.data.view.next);
+      
+      // Charger les détails de chaque lieu
+      const savedLocationsDetails = await Promise.all(
+        response.data.member.filter(sl => sl.isActif !== false).map(async (savedLocation) => {
+          // Extraire l'ID à partir de l'IRI
+          const savedLocationId = savedLocation["@id"] || '';
+          const id = savedLocationId.split('/').pop() || '';
+          
+          // Extraire l'ID de location à partir du champ location
+          // Format attendu: UUID comme "1f020c52-460a-6404-aa96-25f9461f62b2"
+          const locationId = savedLocation.location && typeof savedLocation.location === 'string' 
+                           ? savedLocation.location.split('/').pop() || savedLocation.location
+                           : savedLocation.location;
+          
+          try {
+            // Récupérer les détails du lieu en utilisant l'ID extrait
+            const locationResponse = await locationService.getLocationById(locationId);
+            
+            if (locationResponse.data) {
+              return {
+                id,
+                savedLocationId,
+                name: locationResponse.data.name,
+                description: locationResponse.data.description || '',
+                position: {
+                  lat: locationResponse.data.latitude,
+                  lng: locationResponse.data.longitude,
+                },
+                // Utiliser une image par défaut basée sur le hash de l'ID
+                imageUrl: `https://source.unsplash.com/random/200x150/?landmark&sig=${id}`,
+                dateAdded: new Date().toLocaleDateString('fr-FR', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric'
+                })
+              };
+            }
+          } catch (error) {
+            console.error(`Erreur lors de la récupération des détails pour la location ID: ${locationId}`, error);
+          }
+          
+          return null;
+        })
+      );
+      
+      // Filtrer les éléments null et mettre à jour l'état
+      const validLocations = savedLocationsDetails.filter(location => location !== null) as SavedLocationWithDetails[];
+      
+      if (shouldReset) {
+        setSavedLocations(validLocations);
+      } else {
+        setSavedLocations(prevLocations => [...prevLocations, ...validLocations]);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Une erreur est survenue');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [loading, hasMoreData]);
+  
+  // Charger les données initiales au démarrage
+  useEffect(() => {
+    loadSavedLocations(1, true);
+  }, []);
+  
+  // Gérer le pull-to-refresh
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    setPage(1);
+    loadSavedLocations(1, true);
+  }, [loadSavedLocations]);
+  
+  // Charger plus de données lors du défilement
+  const handleLoadMore = useCallback(() => {
+    if (!loading && hasMoreData) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      loadSavedLocations(nextPage);
+    }
+  }, [loading, hasMoreData, page, loadSavedLocations]);
 
-  const handleViewOnMap = (item: SavedLocation) => {
-    // À implémenter - Navigation vers la carte avec focus sur le marqueur
-    console.log(`Naviguer vers la carte à la position: ${item.position.lat}, ${item.position.lng}`);
+  // Navigation vers la carte avec focus sur un marqueur
+  const handleViewOnMap = (item: SavedLocationWithDetails) => {
+    router.push({
+      pathname: "/(tabs)/",
+      params: { lat: item.position.lat, lng: item.position.lng, name: item.name }
+    });
   };
 
-  const handleDelete = (id: string) => {
+  // Supprimer un lieu enregistré
+  const handleDelete = (item: SavedLocationWithDetails) => {
     Alert.alert(
       'Supprimer ce lieu',
       'Êtes-vous sûr de vouloir supprimer ce lieu enregistré ?',
@@ -68,34 +153,82 @@ export default function SavedScreen() {
         { 
           text: 'Supprimer', 
           style: 'destructive', 
-          onPress: () => {
-            setSavedLocations(prev => prev.filter(item => item.id !== id));
+          onPress: async () => {
+            try {
+              // Extraire l'ID à partir de l'IRI complet
+              const id = item.savedLocationId.split('/').pop();
+              if (!id) return;
+              
+              const response = await locationService.deleteSavedLocation(id);
+              
+              if (response.error) {
+                Alert.alert('Erreur', response.error);
+                return;
+              }
+              
+              // Supprimer l'élément de la liste locale
+              setSavedLocations(prev => prev.filter(location => location.id !== item.id));
+              setTotalItems(prev => Math.max(0, prev - 1));
+              
+            } catch (error) {
+              Alert.alert('Erreur', 'Impossible de supprimer ce lieu.');
+              console.error('Erreur de suppression:', error);
+            }
           }
         },
       ]
     );
   };
 
-  const renderEmptyList = () => (
-    <View style={styles.emptyContainer}>
-      <Image 
-        source={require('@/assets/images/partial-react-logo.png')} 
-        style={styles.emptyImage}
-        resizeMode="contain"
-      />
-      <Text style={styles.emptyTitle}>Aucun lieu enregistré</Text>
-      <Text style={styles.emptyText}>
-        Les lieux que vous enregistrez en faisant un appui long sur la carte apparaîtront ici.
-      </Text>
-    </View>
-  );
+  // Affichage en cas de liste vide
+  const renderEmptyList = () => {
+    if (loading && page === 1) {
+      return (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color="#0a7ea4" />
+          <Text style={styles.emptyText}>Chargement des lieux enregistrés...</Text>
+        </View>
+      );
+    }
+    
+    if (error) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyTitle}>Erreur</Text>
+          <Text style={styles.emptyText}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => loadSavedLocations(1, true)}
+          >
+            <Text style={styles.retryButtonText}>Réessayer</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.emptyContainer}>
+        <Image 
+          source={require('@/assets/images/partial-react-logo.png')} 
+          style={styles.emptyImage}
+          resizeMode="contain"
+        />
+        <Text style={styles.emptyTitle}>Aucun lieu enregistré</Text>
+        <Text style={styles.emptyText}>
+          Les lieux que vous enregistrez en faisant un appui long sur la carte apparaîtront ici.
+        </Text>
+      </View>
+    );
+  };
 
-  const renderItem = ({ item }: { item: SavedLocation }) => (
+  // Affichage d'un élément de la liste
+  const renderItem = ({ item }: { item: SavedLocationWithDetails }) => (
     <View style={[styles.locationCard, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground || '#fff' }]}>
       {item.imageUrl ? (
         <Image 
           source={{ uri: item.imageUrl }} 
           style={styles.locationImage} 
+          resizeMode="cover"
         />
       ) : (
         <View style={styles.placeholderImage}>
@@ -105,8 +238,13 @@ export default function SavedScreen() {
       
       <View style={styles.locationContent}>
         <Text style={[styles.locationName, { color: Colors[colorScheme ?? 'light'].text }]}>{item.name}</Text>
-        <Text style={styles.locationAddress}>{item.address}</Text>
-        <Text style={styles.dateAdded}>Ajouté le {item.dateAdded}</Text>
+        <Text style={[styles.locationAddress, { color: Colors[colorScheme ?? 'light'].secondaryText }]} numberOfLines={2}>
+          {item.description}
+        </Text>
+        
+        {item.dateAdded && (
+          <Text style={styles.dateAdded}>Ajouté le {item.dateAdded}</Text>
+        )}
         
         <View style={styles.buttonContainer}>
           <TouchableOpacity 
@@ -118,7 +256,7 @@ export default function SavedScreen() {
           
           <TouchableOpacity 
             style={[styles.button, styles.deleteButton]} 
-            onPress={() => handleDelete(item.id)}
+            onPress={() => handleDelete(item)}
           >
             <Text style={styles.deleteButtonText}>Supprimer</Text>
           </TouchableOpacity>
@@ -126,6 +264,18 @@ export default function SavedScreen() {
       </View>
     </View>
   );
+
+  // Affichage du footer de la liste (indicateur de chargement)
+  const renderFooter = () => {
+    if (!loading || page === 1) return null;
+    
+    return (
+      <View style={styles.footerContainer}>
+        <ActivityIndicator size="small" color="#0a7ea4" />
+        <Text style={styles.footerText}>Chargement...</Text>
+      </View>
+    );
+  };
 
   return (
     <View style={[
@@ -136,8 +286,8 @@ export default function SavedScreen() {
         <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
           Lieux enregistrés
         </Text>
-        <Text style={styles.subtitle}>
-          {savedLocations.length} {savedLocations.length === 1 ? 'lieu enregistré' : 'lieux enregistrés'}
+        <Text style={[styles.subtitle, { color: Colors[colorScheme ?? 'light'].secondaryText }]}>
+          {totalItems} {totalItems === 1 ? 'lieu enregistré' : 'lieux enregistrés'}
         </Text>
       </View>
 
@@ -147,6 +297,11 @@ export default function SavedScreen() {
         keyExtractor={item => item.id}
         contentContainerStyle={styles.list}
         ListEmptyComponent={renderEmptyList}
+        ListFooterComponent={renderFooter}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.3}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
       />
     </View>
   );
@@ -168,10 +323,10 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
   },
   list: {
     padding: 16,
+    flexGrow: 1,
   },
   locationCard: {
     marginBottom: 16,
@@ -207,7 +362,6 @@ const styles = StyleSheet.create({
   },
   locationAddress: {
     fontSize: 16,
-    color: '#666',
     marginBottom: 8,
   },
   dateAdded: {
@@ -245,6 +399,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+    minHeight: 300,
   },
   emptyImage: {
     width: 150,
@@ -263,5 +418,26 @@ const styles = StyleSheet.create({
     color: '#888',
     textAlign: 'center',
     lineHeight: 22,
+  },
+  footerContainer: {
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  footerText: {
+    marginLeft: 8,
+    color: '#666',
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: '#0a7ea4',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });
