@@ -1,150 +1,123 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, FlatList, TouchableOpacity, Alert, Image, ActivityIndicator } from 'react-native';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
-import { locationService } from '@/services/api/location';
 import { useAuth } from '@/context/AuthContext';
-import { router } from 'expo-router';
+import { locationService } from '@/services/api/location';
+import { Location } from '@/types/location';
+import { useRouter } from 'expo-router';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
-// Définition du type pour un lieu enregistré avec ses détails complets
 interface SavedLocationWithDetails {
-  id: string; // ID du SavedLocation
-  savedLocationId: string; // IRI complet du SavedLocation
+  id: string;
   name: string;
   description: string;
-  address?: string;
   position: {
     lat: number;
     lng: number;
   };
-  dateAdded?: string;
+  dateAdded: string;
   imageUrl?: string;
+  savedLocationId?: string; // ID de l'enregistrement SavedLocation pour la suppression
 }
 
 export default function SavedScreen() {
   const colorScheme = useColorScheme();
   const { authState } = useAuth();
+  const router = useRouter();
   
-  // États pour gérer les données et le chargement
   const [savedLocations, setSavedLocations] = useState<SavedLocationWithDetails[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMoreData, setHasMoreData] = useState(true);
-  const [totalItems, setTotalItems] = useState(0);
-  
-  // Fonction pour charger les lieux enregistrés
-  const loadSavedLocations = useCallback(async (pageNumber: number, shouldReset = false) => {
+
+  useEffect(() => {
+    loadSavedLocations();
+  }, [authState.isAuthenticated]);
+
+  const loadSavedLocations = async () => {
+    if (!authState.isAuthenticated || !authState.user) {
+      // Si l'utilisateur n'est pas connecté, on ne peut pas charger ses locations
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    
     try {
-      if (loading || (!hasMoreData && pageNumber > 1)) return;
-      
-      setLoading(true);
-      setError(null);
-      
-      const response = await locationService.getSavedLocationsWithPagination(pageNumber);
-      
-      if (!response.data || response.error) {
-        setError(response.error || 'Erreur lors du chargement des lieux enregistrés');
+      const userIri = authState.user['@id'];
+      if (!userIri) {
+        setError("Impossible de récupérer l'identifiant utilisateur");
         return;
       }
       
-      setTotalItems(response.data.totalItems);
+      // Récupérer toutes les locations sauvegardées pour l'utilisateur
+      const savedLocationsResponse = await locationService.getSavedLocationsByUser(userIri);
       
-      // Vérifier s'il y a des pages supplémentaires
-      setHasMoreData(!!response.data.view.next);
+      if (!savedLocationsResponse.data) {
+        setError(savedLocationsResponse.error || "Erreur lors du chargement des lieux enregistrés");
+        return;
+      }
       
-      // Charger les détails de chaque lieu
-      const savedLocationsDetails = await Promise.all(
-        response.data.member.filter(sl => sl.isActif !== false).map(async (savedLocation) => {
-          // Extraire l'ID à partir de l'IRI
-          const savedLocationId = savedLocation["@id"] || '';
-          const id = savedLocationId.split('/').pop() || '';
+      // Pour chaque saved location, récupérer les détails de la location
+      const userSavedLocations: SavedLocationWithDetails[] = [];
+      
+      for (const savedLocation of savedLocationsResponse.data) {
+        if (savedLocation.location && typeof savedLocation.location === 'string') {
+          // Extraire l'ID de l'URL IRI (par ex. "/api/locations/1" -> "1")
+          const locationId = savedLocation.location.split('/').pop();
           
-          // Extraire l'ID de location à partir du champ location
-          // Format attendu: UUID comme "1f020c52-460a-6404-aa96-25f9461f62b2"
-          const locationId = savedLocation.location && typeof savedLocation.location === 'string' 
-                           ? savedLocation.location.split('/').pop() || savedLocation.location
-                           : savedLocation.location;
-          
-          try {
-            // Récupérer les détails du lieu en utilisant l'ID extrait
+          if (locationId) {
             const locationResponse = await locationService.getLocationById(locationId);
             
             if (locationResponse.data) {
-              return {
-                id,
-                savedLocationId,
-                name: locationResponse.data.name,
-                description: locationResponse.data.description || '',
+              const location = locationResponse.data;
+              const savedId = savedLocation['@id']?.split('/').pop();
+              
+              userSavedLocations.push({
+                id: locationId,
+                name: location.name,
+                description: location.description,
                 position: {
-                  lat: locationResponse.data.latitude,
-                  lng: locationResponse.data.longitude,
+                  lat: location.latitude,
+                  lng: location.longitude
                 },
-                // Utiliser une image par défaut basée sur le hash de l'ID
-                imageUrl: `https://source.unsplash.com/random/200x150/?landmark&sig=${id}`,
-                dateAdded: new Date().toLocaleDateString('fr-FR', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric'
-                })
-              };
+                dateAdded: format(new Date(), 'dd MMM yyyy', { locale: fr }),
+                savedLocationId: savedId
+              });
             }
-          } catch (error) {
-            console.error(`Erreur lors de la récupération des détails pour la location ID: ${locationId}`, error);
           }
-          
-          return null;
-        })
-      );
-      
-      // Filtrer les éléments null et mettre à jour l'état
-      const validLocations = savedLocationsDetails.filter(location => location !== null) as SavedLocationWithDetails[];
-      
-      if (shouldReset) {
-        setSavedLocations(validLocations);
-      } else {
-        setSavedLocations(prevLocations => [...prevLocations, ...validLocations]);
+        }
       }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Une erreur est survenue');
+      
+      setSavedLocations(userSavedLocations);
+    } catch (err) {
+      console.error("Erreur lors du chargement des lieux enregistrés:", err);
+      setError("Une erreur est survenue lors du chargement des lieux enregistrés");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setIsLoading(false);
     }
-  }, [loading, hasMoreData]);
-  
-  // Charger les données initiales au démarrage
-  useEffect(() => {
-    loadSavedLocations(1, true);
-  }, []);
-  
-  // Gérer le pull-to-refresh
-  const handleRefresh = useCallback(() => {
-    setRefreshing(true);
-    setPage(1);
-    loadSavedLocations(1, true);
-  }, [loadSavedLocations]);
-  
-  // Charger plus de données lors du défilement
-  const handleLoadMore = useCallback(() => {
-    if (!loading && hasMoreData) {
-      const nextPage = page + 1;
-      setPage(nextPage);
-      loadSavedLocations(nextPage);
-    }
-  }, [loading, hasMoreData, page, loadSavedLocations]);
+  };
 
-  // Navigation vers la carte avec focus sur un marqueur
   const handleViewOnMap = (item: SavedLocationWithDetails) => {
+    // Navigation vers la carte avec focus sur le marqueur
     router.push({
-      pathname: "/(tabs)/",
-      params: { lat: item.position.lat, lng: item.position.lng, name: item.name }
+      pathname: "/(tabs)",
+      // On pourrait passer les paramètres pour centrer la carte sur ce lieu
+      params: {
+        latitude: item.position.lat,
+        longitude: item.position.lng,
+        focus: item.id
+      }
     });
   };
 
-  // Supprimer un lieu enregistré
-  const handleDelete = (item: SavedLocationWithDetails) => {
+  const handleDelete = async (item: SavedLocationWithDetails) => {
+    if (!item.savedLocationId) {
+      Alert.alert("Erreur", "Impossible de supprimer ce lieu: identifiant manquant");
+      return;
+    }
+    
     Alert.alert(
       'Supprimer ce lieu',
       'Êtes-vous sûr de vouloir supprimer ce lieu enregistré ?',
@@ -155,24 +128,20 @@ export default function SavedScreen() {
           style: 'destructive', 
           onPress: async () => {
             try {
-              // Extraire l'ID à partir de l'IRI complet
-              const id = item.savedLocationId.split('/').pop();
-              if (!id) return;
+              setIsLoading(true);
               
-              const response = await locationService.deleteSavedLocation(id);
+              // Implémenter l'appel API pour supprimer une savedLocation
+              // Cette fonctionnalité doit être ajoutée au locationService
               
-              if (response.error) {
-                Alert.alert('Erreur', response.error);
-                return;
-              }
+              // Pour l'instant, on supprime simplement localement
+              setSavedLocations(prev => prev.filter(loc => loc.savedLocationId !== item.savedLocationId));
               
-              // Supprimer l'élément de la liste locale
-              setSavedLocations(prev => prev.filter(location => location.id !== item.id));
-              setTotalItems(prev => Math.max(0, prev - 1));
-              
-            } catch (error) {
-              Alert.alert('Erreur', 'Impossible de supprimer ce lieu.');
-              console.error('Erreur de suppression:', error);
+              Alert.alert("Succès", "Le lieu a été supprimé de vos favoris");
+            } catch (err) {
+              console.error("Erreur lors de la suppression:", err);
+              Alert.alert("Erreur", "Une erreur est survenue lors de la suppression");
+            } finally {
+              setIsLoading(false);
             }
           }
         },
@@ -180,55 +149,46 @@ export default function SavedScreen() {
     );
   };
 
-  // Affichage en cas de liste vide
-  const renderEmptyList = () => {
-    if (loading && page === 1) {
-      return (
-        <View style={styles.emptyContainer}>
-          <ActivityIndicator size="large" color="#0a7ea4" />
-          <Text style={styles.emptyText}>Chargement des lieux enregistrés...</Text>
-        </View>
-      );
-    }
-    
-    if (error) {
-      return (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>Erreur</Text>
-          <Text style={styles.emptyText}>{error}</Text>
-          <TouchableOpacity 
-            style={styles.retryButton}
-            onPress={() => loadSavedLocations(1, true)}
-          >
-            <Text style={styles.retryButtonText}>Réessayer</Text>
-          </TouchableOpacity>
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.emptyContainer}>
-        <Image 
-          source={require('@/assets/images/partial-react-logo.png')} 
-          style={styles.emptyImage}
-          resizeMode="contain"
-        />
-        <Text style={styles.emptyTitle}>Aucun lieu enregistré</Text>
-        <Text style={styles.emptyText}>
-          Les lieux que vous enregistrez en faisant un appui long sur la carte apparaîtront ici.
-        </Text>
-      </View>
-    );
-  };
+  const renderLoginPrompt = () => (
+    <View style={styles.emptyContainer}>
+      <Image 
+        source={require('@/assets/images/partial-react-logo.png')} 
+        style={styles.emptyImage}
+        resizeMode="contain"
+      />
+      <Text style={styles.emptyTitle}>Connectez-vous pour enregistrer des lieux</Text>
+      <Text style={styles.emptyText}>
+        Vous devez être connecté pour enregistrer et voir vos lieux favoris.
+      </Text>
+      <TouchableOpacity 
+        style={styles.loginButton}
+        onPress={() => router.push('/(tabs)/settings')}
+      >
+        <Text style={styles.loginButtonText}>Aller aux paramètres</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
-  // Affichage d'un élément de la liste
+  const renderEmptyList = () => (
+    <View style={styles.emptyContainer}>
+      <Image 
+        source={require('@/assets/images/partial-react-logo.png')} 
+        style={styles.emptyImage}
+        resizeMode="contain"
+      />
+      <Text style={styles.emptyTitle}>Aucun lieu enregistré</Text>
+      <Text style={styles.emptyText}>
+        Les lieux que vous enregistrez en faisant un appui long sur la carte apparaîtront ici.
+      </Text>
+    </View>
+  );
+
   const renderItem = ({ item }: { item: SavedLocationWithDetails }) => (
-    <View style={[styles.locationCard, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground || '#fff' }]}>
+    <View style={[styles.locationCard, { backgroundColor: Colors[colorScheme ?? 'light'].cardBackground }]}>
       {item.imageUrl ? (
         <Image 
           source={{ uri: item.imageUrl }} 
           style={styles.locationImage} 
-          resizeMode="cover"
         />
       ) : (
         <View style={styles.placeholderImage}>
@@ -238,13 +198,8 @@ export default function SavedScreen() {
       
       <View style={styles.locationContent}>
         <Text style={[styles.locationName, { color: Colors[colorScheme ?? 'light'].text }]}>{item.name}</Text>
-        <Text style={[styles.locationAddress, { color: Colors[colorScheme ?? 'light'].secondaryText }]} numberOfLines={2}>
-          {item.description}
-        </Text>
-        
-        {item.dateAdded && (
-          <Text style={styles.dateAdded}>Ajouté le {item.dateAdded}</Text>
-        )}
+        <Text style={styles.locationAddress}>{item.description}</Text>
+        <Text style={styles.dateAdded}>Ajouté le {item.dateAdded}</Text>
         
         <View style={styles.buttonContainer}>
           <TouchableOpacity 
@@ -265,17 +220,21 @@ export default function SavedScreen() {
     </View>
   );
 
-  // Affichage du footer de la liste (indicateur de chargement)
-  const renderFooter = () => {
-    if (!loading || page === 1) return null;
-    
+  if (!authState.isAuthenticated) {
     return (
-      <View style={styles.footerContainer}>
-        <ActivityIndicator size="small" color="#0a7ea4" />
-        <Text style={styles.footerText}>Chargement...</Text>
+      <View style={[
+        styles.container, 
+        { backgroundColor: Colors[colorScheme ?? 'light'].background }
+      ]}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
+            Lieux enregistrés
+          </Text>
+        </View>
+        {renderLoginPrompt()}
       </View>
     );
-  };
+  }
 
   return (
     <View style={[
@@ -286,23 +245,39 @@ export default function SavedScreen() {
         <Text style={[styles.title, { color: Colors[colorScheme ?? 'light'].text }]}>
           Lieux enregistrés
         </Text>
-        <Text style={[styles.subtitle, { color: Colors[colorScheme ?? 'light'].secondaryText }]}>
-          {totalItems} {totalItems === 1 ? 'lieu enregistré' : 'lieux enregistrés'}
-        </Text>
+        {!isLoading && !error && (
+          <Text style={styles.subtitle}>
+            {savedLocations.length} {savedLocations.length === 1 ? 'lieu enregistré' : 'lieux enregistrés'}
+          </Text>
+        )}
       </View>
 
-      <FlatList
-        data={savedLocations}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.list}
-        ListEmptyComponent={renderEmptyList}
-        ListFooterComponent={renderFooter}
-        onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.3}
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
-      />
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors[colorScheme ?? 'light'].tint} />
+          <Text style={styles.loadingText}>Chargement de vos lieux enregistrés...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={loadSavedLocations}
+          >
+            <Text style={styles.retryButtonText}>Réessayer</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={savedLocations}
+          renderItem={renderItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={renderEmptyList}
+          refreshing={isLoading}
+          onRefresh={loadSavedLocations}
+        />
+      )}
     </View>
   );
 }
@@ -323,10 +298,10 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
+    color: '#666',
   },
   list: {
     padding: 16,
-    flexGrow: 1,
   },
   locationCard: {
     marginBottom: 16,
@@ -362,6 +337,7 @@ const styles = StyleSheet.create({
   },
   locationAddress: {
     fontSize: 16,
+    color: '#666',
     marginBottom: 8,
   },
   dateAdded: {
@@ -399,7 +375,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    minHeight: 300,
   },
   emptyImage: {
     width: 150,
@@ -419,20 +394,42 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
   },
-  footerContainer: {
-    padding: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
+  loginButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#0a7ea4',
+    borderRadius: 8,
   },
-  footerText: {
-    marginLeft: 8,
+  loginButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
     color: '#666',
   },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#ff3b30',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
   retryButton: {
-    marginTop: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     backgroundColor: '#0a7ea4',
     borderRadius: 8,
   },

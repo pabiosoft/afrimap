@@ -1,4 +1,4 @@
-import { StyleSheet, View, Alert, Platform, Text, Modal, TouchableOpacity, TouchableWithoutFeedback } from 'react-native';
+import { StyleSheet, View, Alert, Platform, Text, Modal, TouchableOpacity, Pressable } from 'react-native';
 import { useState, useRef, useEffect } from 'react';
 import MapView, { Marker, Callout, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -170,14 +170,36 @@ export default function HomeScreen() {
       if (response.data) {
         const newLocation = response.data;
         
-        // Ajouter la nouvelle location à la liste
+        // Ajouter la nouvelle location à la liste des lieux affichés
         setLocations(prev => [...prev, newLocation]);
         
         // Si l'utilisateur est connecté, sauvegarder dans ses favoris
         if (authState.isAuthenticated && authState.user && newLocation['@id']) {
-          const userIri = authState.user['@id'] || '';
-          if (userIri) {
-            await locationService.saveLocationForUser(newLocation['@id'], userIri);
+          try {
+            const userIri = authState.user['@id'] || '';
+            if (userIri) {
+              console.log(`Sauvegarde de la location ${newLocation['@id']} pour l'utilisateur ${userIri}`);
+              const savedResponse = await locationService.saveLocationForUser(newLocation['@id'], userIri);
+              
+              if (savedResponse.data) {
+                console.log('Location sauvegardée avec succès dans les favoris');
+              } else if (savedResponse.error) {
+                console.error('Erreur lors de la sauvegarde dans les favoris:', savedResponse.error);
+                // La location est créée mais pas sauvegardée dans les favoris
+                Alert.alert(
+                  "Attention",
+                  "Le lieu a été créé mais n'a pas pu être ajouté à vos favoris.",
+                  [{ text: "OK" }]
+                );
+              }
+            }
+          } catch (saveError) {
+            console.error('Erreur lors de la sauvegarde dans les favoris:', saveError);
+            Alert.alert(
+              "Attention",
+              "Le lieu a été créé mais n'a pas pu être ajouté à vos favoris.",
+              [{ text: "OK" }]
+            );
           }
         }
         
@@ -188,7 +210,9 @@ export default function HomeScreen() {
         // Informer l'utilisateur
         Alert.alert(
           "Succès",
-          "Le lieu a été créé avec succès.",
+          authState.isAuthenticated 
+            ? "Le lieu a été créé et ajouté à vos favoris."
+            : "Le lieu a été créé avec succès. Connectez-vous pour l'ajouter à vos favoris.",
           [{ text: "OK" }]
         );
       } else {
@@ -225,12 +249,8 @@ export default function HomeScreen() {
         showsUserLocation={true}
         showsMyLocationButton={true}
         onLongPress={handleLongPress}
+        onPress={handlePressIn}
         onRegionChangeComplete={(newRegion: Region) => setRegion(newRegion)}
-        onPress={(event) => {
-          if (Platform.OS === 'ios') {
-            handlePressIn(event);
-          }
-        }}
         onPanDrag={handleDrag}
         onRegionChange={handleDrag}
       >
@@ -264,36 +284,34 @@ export default function HomeScreen() {
         transparent={true}
         visible={showLocationForm}
         animationType="slide"
-        onRequestClose={() => {
-          setShowLocationForm(false);
-          setNewMarkerPosition(null);
-        }}
+        onRequestClose={() => setShowLocationForm(false)}
       >
-        <TouchableWithoutFeedback onPress={() => {
-          setShowLocationForm(false);
-          setNewMarkerPosition(null);
-        }}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
-              <View style={[
-                styles.modalContent, 
-                { backgroundColor: colorScheme === 'dark' ? '#1a1a1a' : '#ffffff' }
-              ]}>
-                {newMarkerPosition && (
-                  <LocationForm
-                    coordinate={newMarkerPosition}
-                    onSave={handleSaveLocation}
-                    onCancel={() => {
-                      setShowLocationForm(false);
-                      setNewMarkerPosition(null);
-                    }}
-                    isLoading={isLoading}
-                  />
-                )}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setShowLocationForm(false);
+            setNewMarkerPosition(null);
+          }}
+        >
+          <TouchableOpacity 
+            activeOpacity={1} 
+            onPress={e => e.stopPropagation()}
+            style={[styles.modalContent, { backgroundColor }]}
+          >
+            {newMarkerPosition && (
+              <LocationForm
+                coordinate={newMarkerPosition}
+                onSave={handleSaveLocation}
+                onCancel={() => {
+                  setShowLocationForm(false);
+                  setNewMarkerPosition(null);
+                }}
+                isLoading={isLoading}
+              />
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
       
       {/* Bouton pour recentrer sur la position de l'utilisateur */}

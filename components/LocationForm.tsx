@@ -9,8 +9,7 @@ import {
   Switch,
   Platform,
   KeyboardAvoidingView,
-  ScrollView,
-  Dimensions
+  ScrollView
 } from 'react-native';
 import { LocationFormData } from '@/types/location';
 import { useAuth } from '@/context/AuthContext';
@@ -23,14 +22,22 @@ interface LocationFormProps {
   isLoading?: boolean;
 }
 
-const { width } = Dimensions.get('window');
-
 const LocationForm: React.FC<LocationFormProps> = ({ 
   coordinate, 
   onSave, 
   onCancel, 
   isLoading = false 
 }) => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  
+  // Couleurs en dur pour garantir le contraste et la visibilité
+  const textColor = isDark ? '#FFFFFF' : '#000000';
+  const inputBgColor = isDark ? '#333333' : '#FFFFFF';
+  const inputBorderColor = isDark ? '#555555' : '#CCCCCC';
+  const labelColor = isDark ? '#FFFFFF' : '#000000';
+  const helperTextColor = isDark ? '#AAAAAA' : '#666666';
+  
   const [formData, setFormData] = useState<LocationFormData>({
     name: '',
     description: '',
@@ -40,17 +47,6 @@ const LocationForm: React.FC<LocationFormProps> = ({
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { authState } = useAuth();
-  
-  // Couleurs adaptatives pour les thèmes clair et sombre
-  const colorScheme = useColorScheme();
-  
-  // Définition manuelle des couleurs basées sur le thème
-  const textColor = colorScheme === 'dark' ? '#ffffff' : '#374151';
-  const secondaryTextColor = colorScheme === 'dark' ? '#9ca3af' : '#6b7280';
-  const inputBackgroundColor = colorScheme === 'dark' ? '#1f2937' : '#ffffff';
-  const inputBorderColor = colorScheme === 'dark' ? '#374151' : '#e5e7eb';
-  const placeholderColor = colorScheme === 'dark' ? '#6b7280' : '#9ca3af';
-  const cardBackgroundColor = colorScheme === 'dark' ? '#111827' : '#f9fafb';
   
   const handleChange = (field: keyof LocationFormData, value: string | boolean) => {
     // Pour la visibilité, on convertit le booléen (isPublic) en chaîne
@@ -101,112 +97,117 @@ const LocationForm: React.FC<LocationFormProps> = ({
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.keyboardAvoidingContainer}
     >
-      {/* Drag indicator for better UX */}
-      <View style={styles.dragIndicatorContainer}>
-        <View style={styles.dragIndicator} />
-      </View>
-      
-      <ScrollView 
-        contentContainerStyle={styles.formScroll}
-        showsVerticalScrollIndicator={false}
-        bounces={true}
-      >
-        <View style={styles.formContainer}>
+      <ScrollView contentContainerStyle={styles.formScroll}>
+        <View style={[styles.formContainer, { backgroundColor: isDark ? '#121212' : '#FFFFFF' }]}>
+          {/* Titre avec couleur forcée */}
           <Text style={[styles.title, { color: textColor }]}>Nouveau lieu</Text>
           
-          <View style={[styles.card, { backgroundColor: cardBackgroundColor }]}>
-            <View style={styles.formGroup}>
-              <Text style={[styles.label, { color: textColor }]}>Nom</Text>
-              <TextInput
-                style={[
-                  styles.input, 
-                  { 
-                    backgroundColor: inputBackgroundColor, 
-                    borderColor: errors.name ? '#ef4444' : inputBorderColor,
-                    color: textColor
-                  }
-                ]}
-                value={formData.name}
-                onChangeText={(value) => handleChange('name', value)}
-                placeholder="Nom du lieu"
-                placeholderTextColor={placeholderColor}
-                editable={!isLoading}
-              />
-              {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
-            </View>
-            
-            <View style={styles.formGroup}>
-              <Text style={[styles.label, { color: textColor }]}>Description</Text>
-              <TextInput
-                style={[
-                  styles.input, 
-                  styles.textArea,
-                  { 
-                    backgroundColor: inputBackgroundColor, 
-                    borderColor: errors.description ? '#ef4444' : inputBorderColor,
-                    color: textColor
-                  }
-                ]}
-                value={formData.description}
-                onChangeText={(value) => handleChange('description', value)}
-                placeholder="Description du lieu"
-                placeholderTextColor={placeholderColor}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                editable={!isLoading}
-              />
-              {errors.description ? <Text style={styles.errorText}>{errors.description}</Text> : null}
-            </View>
+          {/* Champ Nom */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, { color: labelColor }]}>Nom</Text>
+            <TextInput
+              style={[
+                styles.input, 
+                { 
+                  backgroundColor: inputBgColor, 
+                  borderColor: inputBorderColor, 
+                  color: textColor 
+                }
+              ]}
+              value={formData.name}
+              onChangeText={(value) => handleChange('name', value)}
+              placeholder="Nom du lieu"
+              placeholderTextColor={isDark ? '#888888' : '#AAAAAA'}
+              editable={!isLoading}
+            />
+            {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
           </View>
           
-          <View style={[styles.card, { backgroundColor: cardBackgroundColor, marginTop: 16 }]}>
-            <View style={styles.formGroup}>
-              <Text style={[styles.label, { color: textColor }]}>Coordonnées</Text>
-              <View style={[styles.coordinatesContainer, { backgroundColor: inputBackgroundColor, borderColor: inputBorderColor }]}>
-                <Text style={[styles.coordinates, { color: secondaryTextColor }]}>
-                  {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
-                </Text>
-              </View>
-            </View>
-            
-            <View style={styles.formGroup}>
-              <View style={styles.switchRow}>
-                <View>
-                  <Text style={[styles.label, { color: textColor }]}>Visibilité</Text>
-                  <Text style={[styles.helperText, { color: secondaryTextColor }]}>
-                    {isPublic 
-                      ? 'Ce lieu sera visible par tous les utilisateurs' 
-                      : 'Ce lieu ne sera visible que par vous'}
-                  </Text>
-                </View>
-                <Switch 
-                  value={isPublic}
-                  onValueChange={(value) => handleChange('visibility', value)}
-                  disabled={isLoading}
-                  trackColor={{ false: '#767577', true: '#bfdbfe' }}
-                  thumbColor={isPublic ? '#0a7ea4' : '#f4f3f4'}
-                  ios_backgroundColor="#3e3e3e"
-                />
-              </View>
-            </View>
+          {/* Champ Description */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, { color: labelColor }]}>Description</Text>
+            <TextInput
+              style={[
+                styles.input, 
+                styles.textArea, 
+                { 
+                  backgroundColor: inputBgColor, 
+                  borderColor: inputBorderColor, 
+                  color: textColor 
+                }
+              ]}
+              value={formData.description}
+              onChangeText={(value) => handleChange('description', value)}
+              placeholder="Description du lieu"
+              placeholderTextColor={isDark ? '#888888' : '#AAAAAA'}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              editable={!isLoading}
+            />
+            {errors.description ? <Text style={styles.errorText}>{errors.description}</Text> : null}
           </View>
           
+          {/* Coordonnées */}
+          <View style={styles.formGroup}>
+            <Text style={[styles.label, { color: labelColor }]}>Coordonnées</Text>
+            <Text style={[styles.coordinates, { color: helperTextColor }]}>
+              {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
+            </Text>
+          </View>
+          
+          {/* Switch Public/Privé */}
+          <View style={styles.formGroup}>
+            <View style={styles.switchRow}>
+              <Text style={[styles.label, { color: labelColor }]}>Public</Text>
+              <Switch 
+                value={isPublic}
+                onValueChange={(value) => handleChange('visibility', value)}
+                disabled={isLoading}
+                trackColor={{ false: '#767577', true: '#81b0ff' }}
+                thumbColor={isPublic ? '#0a7ea4' : '#f4f3f4'}
+              />
+            </View>
+            <Text style={[styles.helperText, { color: helperTextColor }]}>
+              {isPublic 
+                ? 'Ce lieu sera visible par tous les utilisateurs' 
+                : 'Ce lieu ne sera visible que par vous'}
+            </Text>
+          </View>
+          
+          {/* Avertissement si non connecté */}
           {!authState.isAuthenticated && (
-            <View style={[styles.warningContainer, { backgroundColor: '#fffbeb', borderColor: '#fef3c7' }]}>
-              <Text style={styles.warningText}>
-                Vous n'êtes pas connecté. Pour sauvegarder ce lieu dans votre compte, veuillez vous connecter dans les paramètres.
+            <View 
+              style={[
+                styles.warningContainer, 
+                { 
+                  backgroundColor: isDark ? '#332d00' : '#fff3cd', 
+                  borderColor: isDark ? '#665b00' : '#ffecb5' 
+                }
+              ]}
+            >
+              <Text 
+                style={[
+                  styles.warningText, 
+                  { color: isDark ? '#ffd700' : '#664d03' }
+                ]}
+              >
+                Vous n'êtes pas connecté. Pour sauvegarder ce lieu dans votre compte, 
+                veuillez vous connecter dans les paramètres.
               </Text>
             </View>
           )}
           
+          {/* Boutons */}
           <View style={styles.buttonRow}>
             <TouchableOpacity 
               style={[styles.button, styles.cancelButton]} 
               onPress={onCancel}
               disabled={isLoading}
             >
-              <Text style={[styles.buttonText, { color: colorScheme === 'dark' ? '#ffffff' : '#374151' }]}>Annuler</Text>
+              <Text style={{ color: isDark ? '#FFFFFF' : '#000000', fontWeight: 'bold' }}>
+                Annuler
+              </Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -221,7 +222,7 @@ const LocationForm: React.FC<LocationFormProps> = ({
               {isLoading ? (
                 <ActivityIndicator color="#ffffff" size="small" />
               ) : (
-                <Text style={[styles.buttonText, { color: '#ffffff' }]}>Enregistrer</Text>
+                <Text style={styles.buttonText}>Enregistrer</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -234,39 +235,18 @@ const LocationForm: React.FC<LocationFormProps> = ({
 const styles = StyleSheet.create({
   keyboardAvoidingContainer: {
     flex: 1,
-    width: '100%',
-  },
-  dragIndicatorContainer: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  dragIndicator: {
-    width: 40,
-    height: 5,
-    backgroundColor: '#cbd5e1',
-    borderRadius: 2.5,
   },
   formScroll: {
     flexGrow: 1,
-    paddingBottom: 40,
   },
   formContainer: {
-    padding: 16,
+    padding: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 24,
+    marginBottom: 20,
     textAlign: 'center',
-  },
-  card: {
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
   },
   formGroup: {
     marginBottom: 16,
@@ -274,30 +254,24 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '500',
-    marginBottom: 8,
+    marginBottom: 5,
   },
   input: {
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 5,
+    padding: 10,
     fontSize: 16,
   },
   textArea: {
-    minHeight: 120,
+    minHeight: 100,
   },
   errorText: {
-    color: '#ef4444',
+    color: '#ff3b30',
     fontSize: 14,
-    marginTop: 4,
-    marginLeft: 2,
-  },
-  coordinatesContainer: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
+    marginTop: 5,
   },
   coordinates: {
-    fontSize: 16,
+    fontSize: 14,
   },
   switchRow: {
     flexDirection: 'row',
@@ -305,38 +279,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   helperText: {
-    fontSize: 14,
+    fontSize: 12,
     marginTop: 4,
-  },
-  warningContainer: {
-    marginVertical: 16,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-  },
-  warningText: {
-    color: '#92400e',
-    fontSize: 14,
   },
   buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 24,
+    marginTop: 20,
   },
   button: {
     flex: 1,
-    padding: 14,
-    borderRadius: 8,
+    padding: 15,
+    borderRadius: 5,
     alignItems: 'center',
     marginHorizontal: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   cancelButton: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: '#cccccc',
   },
   submitButton: {
     backgroundColor: '#0a7ea4',
@@ -345,9 +304,19 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   buttonText: {
-    fontWeight: '600',
+    color: 'white',
+    fontWeight: 'bold',
     fontSize: 16,
   },
+  warningContainer: {
+    borderWidth: 1,
+    borderRadius: 5,
+    padding: 10,
+    marginVertical: 10,
+  },
+  warningText: {
+    fontSize: 14,
+  }
 });
 
 export default LocationForm;

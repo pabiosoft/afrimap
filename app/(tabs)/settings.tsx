@@ -21,8 +21,8 @@ export default function SettingsScreen() {
   const [darkMapEnabled, setDarkMapEnabled] = useState(false);
   
   const colorScheme = useColorScheme();
-  const backgroundColor = useThemeColor({ light: '#f9f9f9', dark: '#000' }, 'background');
-  const textColor = useThemeColor({ light: '#000', dark: '#fff' }, 'text');
+  const backgroundColor = useThemeColor({ light: '#f9f9f9', dark: '#000' });
+  const textColor = useThemeColor({ light: '#000', dark: '#fff' });
   
   const toggleAuthForms = (showLogin: boolean) => {
     if (showLogin) {
